@@ -15,6 +15,12 @@ type Cita = {
   servicios: { nombre: string; precio: number } | null
 }
 
+type Negocio = {
+  id: string
+  nombre: string
+  slug: string
+}
+
 const estadoColores: Record<string, string> = {
   pendiente: 'bg-yellow-100 text-yellow-800',
   confirmada: 'bg-green-100 text-green-800',
@@ -24,55 +30,68 @@ const estadoColores: Record<string, string> = {
 
 export default function Admin() {
   const router = useRouter()
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) router.push('/login')
-    })
-  }, [router])
   const [citas, setCitas] = useState<Cita[]>([])
+  const [negocio, setNegocio] = useState<Negocio | null>(null)
   const [cargando, setCargando] = useState(true)
   const [filtro, setFiltro] = useState('todos')
 
-  const cargarCitas = async () => {
-    const { data } = await supabase
+  const cargarDatos = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) { router.push('/login'); return }
+
+    const { data: negocioData } = await supabase
+      .from('negocios')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .single()
+
+    if (!negocioData) { router.push('/login'); return }
+    setNegocio(negocioData)
+
+    const { data: citasData } = await supabase
       .from('citas')
       .select('*, servicios(nombre, precio)')
+      .eq('negocio_id', negocioData.id)
       .order('fecha_hora', { ascending: true })
-    setCitas(data || [])
+
+    setCitas(citasData || [])
     setCargando(false)
-  }
+  }, [router])
 
   const cambiarEstado = async (id: string, nuevoEstado: string) => {
     await supabase.from('citas').update({ estado: nuevoEstado }).eq('id', id)
-    cargarCitas()
+    cargarDatos()
   }
 
-  useEffect(() => { cargarCitas() }, [])
+  useEffect(() => { cargarDatos() }, [cargarDatos])
 
   const citasFiltradas = filtro === 'todos' ? citas : citas.filter(c => c.estado === filtro)
 
   return (
     <main className="min-h-screen bg-gray-50">
-      {/* Header */}
       <div className="bg-white shadow-sm">
         <div className="max-w-5xl mx-auto px-8 py-4 flex justify-between items-center">
-          <h1 className="text-xl font-bold text-indigo-700">AgendaFácil — Admin</h1>
-          <nav className="flex gap-4">
+          <h1 className="text-xl font-bold text-indigo-700">
+            {negocio?.nombre || 'AgendaFácil'} — Admin
+          </h1>
+          <nav className="flex gap-4 items-center">
             <Link href="/admin" className="text-indigo-600 font-medium border-b-2 border-indigo-600 pb-1">Citas</Link>
             <Link href="/admin/servicios" className="text-gray-500 hover:text-indigo-600 transition pb-1">Servicios</Link>
             <Link href="/admin/horarios" className="text-gray-500 hover:text-indigo-600 transition pb-1">Horarios</Link>
-            <Link href="/agendar" target="_blank" className="text-gray-500 hover:text-indigo-600 transition pb-1">Ver formulario ↗</Link>
-<button onClick={async () => { await supabase.auth.signOut(); router.push('/login') }}
-  className="text-red-500 hover:text-red-700 transition pb-1 text-sm font-medium">
-  Cerrar sesión
-</button>
+            {negocio?.slug && (
+              <Link href={`/negocio/${negocio.slug}`} target="_blank" className="text-gray-500 hover:text-indigo-600 transition pb-1">
+                Ver formulario ↗
+              </Link>
+            )}
+            <button onClick={async () => { await supabase.auth.signOut(); router.push('/login') }}
+              className="text-red-500 hover:text-red-700 transition pb-1 text-sm font-medium">
+              Cerrar sesión
+            </button>
           </nav>
         </div>
       </div>
 
       <div className="max-w-5xl mx-auto px-8 py-8">
-        {/* Stats */}
         <div className="grid grid-cols-4 gap-4 mb-8">
           {[
             { label: 'Total', value: citas.length, color: 'text-gray-800' },
@@ -87,9 +106,6 @@ export default function Admin() {
           ))}
         </div>
 
-        <p className="text-gray-500 mb-4 text-sm">{citasFiltradas.length} citas mostradas</p>
-
-        {/* Filtros */}
         <div className="flex gap-2 mb-6 flex-wrap">
           {['todos', 'pendiente', 'confirmada', 'completada', 'cancelada'].map(f => (
             <button key={f} onClick={() => setFiltro(f)}
@@ -99,7 +115,6 @@ export default function Admin() {
           ))}
         </div>
 
-        {/* Lista de citas */}
         {cargando ? (
           <p className="text-gray-400">Cargando citas...</p>
         ) : citasFiltradas.length === 0 ? (
