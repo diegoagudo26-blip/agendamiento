@@ -1,7 +1,8 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 
 type Cita = {
   id: string
@@ -22,6 +23,13 @@ const estadoColores: Record<string, string> = {
 }
 
 export default function Admin() {
+  const router = useRouter()
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) router.push('/login')
+    })
+  }, [router])
   const [citas, setCitas] = useState<Cita[]>([])
   const [cargando, setCargando] = useState(true)
   const [filtro, setFiltro] = useState('todos')
@@ -55,6 +63,10 @@ export default function Admin() {
             <Link href="/admin/servicios" className="text-gray-500 hover:text-indigo-600 transition pb-1">Servicios</Link>
             <Link href="/admin/horarios" className="text-gray-500 hover:text-indigo-600 transition pb-1">Horarios</Link>
             <Link href="/agendar" target="_blank" className="text-gray-500 hover:text-indigo-600 transition pb-1">Ver formulario ↗</Link>
+<button onClick={async () => { await supabase.auth.signOut(); router.push('/login') }}
+  className="text-red-500 hover:text-red-700 transition pb-1 text-sm font-medium">
+  Cerrar sesión
+</button>
           </nav>
         </div>
       </div>
