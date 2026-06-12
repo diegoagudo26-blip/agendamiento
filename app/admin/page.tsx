@@ -13,19 +13,23 @@ type Cita = {
   estado: string
   notas: string
   servicios: { nombre: string; precio: number } | null
+  profesionales: { nombre: string } | null
 }
 
-type Negocio = {
-  id: string
-  nombre: string
-  slug: string
-}
+type Negocio = { id: string; nombre: string; slug: string; logo_url: string }
 
 const estadoColores: Record<string, string> = {
-  pendiente: 'bg-yellow-100 text-yellow-800',
-  confirmada: 'bg-green-100 text-green-800',
-  cancelada: 'bg-red-100 text-red-800',
-  completada: 'bg-gray-100 text-gray-800',
+  nueva: 'bg-blue-100 text-blue-700',
+  confirmada: 'bg-green-100 text-green-700',
+  cancelada: 'bg-red-100 text-red-700',
+  completada: 'bg-gray-100 text-gray-500',
+}
+
+const estadoLabels: Record<string, string> = {
+  nueva: 'Nueva',
+  confirmada: 'Confirmada',
+  cancelada: 'Cancelada',
+  completada: 'Completada',
 }
 
 export default function Admin() {
@@ -38,22 +42,14 @@ export default function Admin() {
   const cargarDatos = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) { router.push('/login'); return }
-
-    const { data: negocioData } = await supabase
-      .from('negocios')
-      .select('*')
-      .eq('user_id', session.user.id)
-      .single()
-
+    const { data: negocioData } = await supabase.from('negocios').select('*').eq('user_id', session.user.id).single()
     if (!negocioData) { router.push('/login'); return }
     setNegocio(negocioData)
-
     const { data: citasData } = await supabase
       .from('citas')
-      .select('*, servicios(nombre, precio)')
+      .select('*, servicios(nombre, precio), profesionales(nombre)')
       .eq('negocio_id', negocioData.id)
       .order('fecha_hora', { ascending: true })
-
     setCitas(citasData || [])
     setCargando(false)
   }, [router])
@@ -67,102 +63,138 @@ export default function Admin() {
 
   const citasFiltradas = filtro === 'todos' ? citas : citas.filter(c => c.estado === filtro)
 
+  const stats = [
+    { label: 'Total', value: citas.length, color: 'text-[#111]' },
+    { label: 'Nuevas', value: citas.filter(c => c.estado === 'nueva' || c.estado === 'pendiente').length, color: 'text-blue-600' },
+    { label: 'Confirmadas', value: citas.filter(c => c.estado === 'confirmada').length, color: 'text-green-600' },
+    { label: 'Completadas', value: citas.filter(c => c.estado === 'completada').length, color: 'text-gray-500' },
+  ]
+
   return (
-    <main className="min-h-screen bg-gray-50">
-      <div className="bg-white shadow-sm">
-        <div className="max-w-5xl mx-auto px-8 py-4 flex justify-between items-center">
-          <h1 className="text-xl font-bold text-indigo-700">
-            {negocio?.nombre || 'AgendaFácil'} — Admin
-          </h1>
-          <nav className="flex gap-4 items-center">
-            <Link href="/admin" className="text-indigo-600 font-medium border-b-2 border-indigo-600 pb-1">Citas</Link>
-            <Link href="/admin/servicios" className="text-gray-500 hover:text-indigo-600 transition pb-1">Servicios</Link>
-            <Link href="/admin/horarios" className="text-gray-500 hover:text-indigo-600 transition pb-1">Horarios</Link>
+    <main className="min-h-screen bg-[#fafafa]">
+      {/* Header */}
+      <div className="bg-white border-b border-[#e5e5e5]">
+        <div className="max-w-6xl mx-auto px-6 py-3 flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            {negocio?.logo_url && (
+              <img src={negocio.logo_url} alt="logo" className="h-8 w-auto object-contain" />
+            )}
+            <span className="font-black text-[#111]">{negocio?.nombre || '...'}</span>
+          </div>
+          <nav className="flex gap-5 items-center text-sm">
+            <Link href="/admin" className="text-amber-500 font-bold">Citas</Link>
+            <Link href="/admin/servicios" className="text-gray-500 hover:text-[#111] transition">Servicios</Link>
+            <Link href="/admin/horarios" className="text-gray-500 hover:text-[#111] transition">Horarios</Link>
+            <Link href="/admin/profesionales" className="text-gray-500 hover:text-[#111] transition">Profesionales</Link>
+            <Link href="/admin/configuracion" className="text-gray-500 hover:text-[#111] transition">Configuración</Link>
             {negocio?.slug && (
-              <Link href={`/negocio/${negocio.slug}`} target="_blank" className="text-gray-500 hover:text-indigo-600 transition pb-1">
+              <Link href={`/negocio/${negocio.slug}`} target="_blank"
+                className="bg-amber-400 text-[#111] font-bold px-3 py-1.5 rounded-lg text-xs hover:bg-amber-500 transition">
                 Ver formulario ↗
               </Link>
             )}
             <button onClick={async () => { await supabase.auth.signOut(); router.push('/login') }}
-              className="text-red-500 hover:text-red-700 transition pb-1 text-sm font-medium">
-              Cerrar sesión
+              className="text-red-400 hover:text-red-600 transition text-xs">
+              Salir
             </button>
           </nav>
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto px-8 py-8">
+      <div className="max-w-6xl mx-auto px-6 py-8">
+        {/* Stats */}
         <div className="grid grid-cols-4 gap-4 mb-8">
-          {[
-            { label: 'Total', value: citas.length, color: 'text-gray-800' },
-            { label: 'Pendientes', value: citas.filter(c => c.estado === 'pendiente').length, color: 'text-yellow-600' },
-            { label: 'Confirmadas', value: citas.filter(c => c.estado === 'confirmada').length, color: 'text-green-600' },
-            { label: 'Completadas', value: citas.filter(c => c.estado === 'completada').length, color: 'text-gray-500' },
-          ].map(stat => (
-            <div key={stat.label} className="bg-white rounded-xl shadow p-4 text-center">
-              <p className={`text-3xl font-bold ${stat.color}`}>{stat.value}</p>
-              <p className="text-gray-500 text-sm">{stat.label}</p>
+          {stats.map(s => (
+            <div key={s.label} className="bg-white border border-[#e5e5e5] rounded-xl p-4 text-center">
+              <p className={`text-3xl font-black ${s.color}`}>{s.value}</p>
+              <p className="text-gray-400 text-xs mt-1">{s.label}</p>
             </div>
           ))}
         </div>
 
-        <div className="flex gap-2 mb-6 flex-wrap">
-          {['todos', 'pendiente', 'confirmada', 'completada', 'cancelada'].map(f => (
+        {/* Filtros */}
+        <div className="flex gap-2 mb-4 flex-wrap">
+          {['todos', 'nueva', 'confirmada', 'completada', 'cancelada'].map(f => (
             <button key={f} onClick={() => setFiltro(f)}
-              className={`px-4 py-2 rounded-full text-sm font-medium capitalize transition ${filtro === f ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 border hover:bg-indigo-50'}`}>
-              {f}
+              className={`px-4 py-1.5 rounded-full text-xs font-bold capitalize transition ${filtro === f ? 'bg-amber-400 text-[#111]' : 'bg-white text-gray-500 border border-[#e5e5e5] hover:border-amber-300'}`}>
+              {f === 'todos' ? 'Todas' : estadoLabels[f]}
             </button>
           ))}
         </div>
 
+        {/* Tabla */}
         {cargando ? (
-          <p className="text-gray-400">Cargando citas...</p>
+          <p className="text-gray-400 text-sm">Cargando...</p>
         ) : citasFiltradas.length === 0 ? (
-          <p className="text-gray-400">No hay citas en esta categoría.</p>
+          <div className="bg-white border border-[#e5e5e5] rounded-xl p-12 text-center">
+            <p className="text-gray-400">No hay citas en esta categoría.</p>
+          </div>
         ) : (
-          <div className="flex flex-col gap-4">
-            {citasFiltradas.map(cita => (
-              <div key={cita.id} className="bg-white rounded-xl shadow p-6">
-                <div className="flex justify-between items-start flex-wrap gap-2">
-                  <div>
-                    <h2 className="text-lg font-bold text-gray-800">{cita.cliente_nombre}</h2>
-                    <p className="text-gray-500 text-sm">{cita.cliente_email} · {cita.cliente_telefono}</p>
-                    {cita.servicios && (
-                      <p className="text-indigo-500 text-sm mt-1">
-                        {cita.servicios.nombre} · ${cita.servicios.precio.toLocaleString('es-CO')} COP
+          <div className="bg-white border border-[#e5e5e5] rounded-xl overflow-hidden">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-[#e5e5e5] bg-[#fafafa]">
+                  <th className="text-left px-4 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider">Cliente</th>
+                  <th className="text-left px-4 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider">Servicio</th>
+                  <th className="text-left px-4 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider">Profesional</th>
+                  <th className="text-left px-4 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider">Fecha y hora</th>
+                  <th className="text-left px-4 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider">Estado</th>
+                  <th className="text-left px-4 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {citasFiltradas.map((cita, i) => (
+                  <tr key={cita.id} className={`border-b border-[#f0f0f0] hover:bg-amber-50 transition ${i % 2 === 0 ? 'bg-white' : 'bg-[#fafafa]'}`}>
+                    <td className="px-4 py-3">
+                      <p className="font-bold text-[#111] text-sm">{cita.cliente_nombre}</p>
+                      <p className="text-gray-400 text-xs">{cita.cliente_telefono}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="text-sm text-[#111]">{cita.servicios?.nombre || '—'}</p>
+                      <p className="text-xs text-amber-500 font-bold">${cita.servicios?.precio.toLocaleString('es-CO')}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="text-sm text-[#111]">{cita.profesionales?.nombre || '—'}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="text-sm text-[#111] font-medium">
+                        {new Date(cita.fecha_hora).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })}
                       </p>
-                    )}
-                    <p className="text-indigo-600 font-medium mt-1">
-                      {new Date(cita.fecha_hora).toLocaleString('es-CO', { dateStyle: 'full', timeStyle: 'short' })}
-                    </p>
-                    {cita.notas && <p className="text-gray-400 text-sm mt-1">Nota: {cita.notas}</p>}
-                  </div>
-                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${estadoColores[cita.estado]}`}>
-                    {cita.estado}
-                  </span>
-                </div>
-                <div className="flex gap-2 mt-4 flex-wrap">
-                  {cita.estado !== 'confirmada' && (
-                    <button onClick={() => cambiarEstado(cita.id, 'confirmada')}
-                      className="bg-green-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-600 transition">
-                      Confirmar
-                    </button>
-                  )}
-                  {cita.estado !== 'completada' && (
-                    <button onClick={() => cambiarEstado(cita.id, 'completada')}
-                      className="bg-gray-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-600 transition">
-                      Completada
-                    </button>
-                  )}
-                  {cita.estado !== 'cancelada' && (
-                    <button onClick={() => cambiarEstado(cita.id, 'cancelada')}
-                      className="bg-red-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-red-600 transition">
-                      Cancelar
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
+                      <p className="text-xs text-gray-400">
+                        {new Date(cita.fecha_hora).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-1 rounded-full text-xs font-bold ${estadoColores[cita.estado] || estadoColores['nueva']}`}>
+                        {estadoLabels[cita.estado] || 'Nueva'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-1 flex-wrap">
+                        {cita.estado !== 'confirmada' && cita.estado !== 'completada' && cita.estado !== 'cancelada' && (
+                          <button onClick={() => cambiarEstado(cita.id, 'confirmada')}
+                            className="bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-bold hover:bg-green-600 transition">
+                            Confirmar
+                          </button>
+                        )}
+                        {cita.estado !== 'completada' && cita.estado !== 'cancelada' && (
+                          <button onClick={() => cambiarEstado(cita.id, 'completada')}
+                            className="bg-gray-400 text-white px-2 py-1 rounded-lg text-xs font-bold hover:bg-gray-500 transition">
+                            Completar
+                          </button>
+                        )}
+                        {cita.estado !== 'cancelada' && cita.estado !== 'completada' && (
+                          <button onClick={() => cambiarEstado(cita.id, 'cancelada')}
+                            className="bg-red-400 text-white px-2 py-1 rounded-lg text-xs font-bold hover:bg-red-500 transition">
+                            Cancelar
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

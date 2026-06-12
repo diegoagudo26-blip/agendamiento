@@ -100,7 +100,7 @@ export default function NegocioPage() {
       profesional_id: profesionalId || null,
       fecha_hora,
       negocio_id: negocio.id,
-      estado: 'pendiente'
+      estado: 'nueva'
     }])
     if (!error) {
       await fetch('/api/enviar-email', {
