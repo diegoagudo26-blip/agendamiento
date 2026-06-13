@@ -143,6 +143,12 @@ export default function NegocioPage() {
           </div>
         )}
       </div>
+      {/* Powered by */}
+      <div className="text-center py-6">
+        <p className="text-xs text-[#a3a3a3]">
+          Powered by <a href="/" className="text-amber-500 font-bold hover:underline">AgendaFácil</a>
+        </p>
+      </div>
     </main>
   )
 

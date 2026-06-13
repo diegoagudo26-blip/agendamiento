@@ -72,34 +72,7 @@ export default function Admin() {
 
   return (
     <main className="min-h-screen bg-[#fafafa]">
-      {/* Header */}
-      <div className="bg-white border-b border-[#e5e5e5]">
-        <div className="max-w-6xl mx-auto px-6 py-3 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            {negocio?.logo_url && (
-              <img src={negocio.logo_url} alt="logo" className="h-8 w-auto object-contain" />
-            )}
-            <span className="font-black text-[#111]">{negocio?.nombre || '...'}</span>
-          </div>
-          <nav className="flex gap-5 items-center text-sm">
-            <Link href="/admin" className="text-amber-500 font-bold">Citas</Link>
-            <Link href="/admin/servicios" className="text-gray-500 hover:text-[#111] transition">Servicios</Link>
-            <Link href="/admin/horarios" className="text-gray-500 hover:text-[#111] transition">Horarios</Link>
-            <Link href="/admin/profesionales" className="text-gray-500 hover:text-[#111] transition">Profesionales</Link>
-            <Link href="/admin/configuracion" className="text-gray-500 hover:text-[#111] transition">Configuración</Link>
-            {negocio?.slug && (
-              <Link href={`/negocio/${negocio.slug}`} target="_blank"
-                className="bg-amber-400 text-[#111] font-bold px-3 py-1.5 rounded-lg text-xs hover:bg-amber-500 transition">
-                Ver formulario ↗
-              </Link>
-            )}
-            <button onClick={async () => { await supabase.auth.signOut(); router.push('/login') }}
-              className="text-red-400 hover:text-red-600 transition text-xs">
-              Salir
-            </button>
-          </nav>
-        </div>
-      </div>
+     
 
       <div className="max-w-6xl mx-auto px-6 py-8">
         {/* Stats */}

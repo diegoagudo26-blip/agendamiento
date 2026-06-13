@@ -96,22 +96,12 @@ export default function Profesionales() {
 
   return (
     <main className="min-h-screen bg-gray-50">
-      <div className="bg-white shadow-sm">
-        <div className="max-w-5xl mx-auto px-8 py-4 flex justify-between items-center">
-          <h1 className="text-xl font-bold text-indigo-700">AgendaFácil — Admin</h1>
-          <nav className="flex gap-4 items-center">
-            <Link href="/admin" className="text-gray-500 hover:text-indigo-600 transition pb-1">Citas</Link>
-            <Link href="/admin/servicios" className="text-gray-500 hover:text-indigo-600 transition pb-1">Servicios</Link>
-            <Link href="/admin/horarios" className="text-gray-500 hover:text-indigo-600 transition pb-1">Horarios</Link>
-            <Link href="/admin/profesionales" className="text-indigo-600 font-medium border-b-2 border-indigo-600 pb-1">Profesionales</Link>
-          </nav>
-        </div>
-      </div>
+      
 
       <div className="max-w-2xl mx-auto px-8 py-8">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-[#111]">Profesionales</h2>
-          <Link href="/admin" className="text-sm text-indigo-600 hover:underline">← Volver</Link>
+          
         </div>
 
         <div className="bg-white rounded-xl border border-[#e5e5e5] p-6 mb-6">
