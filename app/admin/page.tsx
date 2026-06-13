@@ -56,6 +56,23 @@ export default function Admin() {
 
   const cambiarEstado = async (id: string, nuevoEstado: string) => {
     await supabase.from('citas').update({ estado: nuevoEstado }).eq('id', id)
+    
+    if (nuevoEstado === 'completada') {
+      const cita = citas.find(c => c.id === id)
+      if (cita?.cliente_email) {
+        await fetch('/api/enviar-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tipo: 'agradecimiento',
+            cliente_nombre: cita.cliente_nombre,
+            cliente_email: cita.cliente_email,
+            negocio_nombre: negocio?.nombre
+          })
+        })
+      }
+    }
+    
     cargarDatos()
   }
 
