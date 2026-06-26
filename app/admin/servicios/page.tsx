@@ -23,13 +23,14 @@ async function getCroppedImg(imageSrc: string, pixelCrop: Area): Promise<Blob> {
 
 export default function Servicios() {
   const router = useRouter()
+  const [errorEliminar, setErrorEliminar] = useState<string | null>(null)
   const [servicios, setServicios] = useState<Servicio[]>([])
   const [negocio, setNegocio] = useState<Negocio | null>(null)
   const [negocioId, setNegocioId] = useState('')
   const [form, setForm] = useState({ nombre: '', duracion_minutos: 30, precio: '' })
   const [imagenSrc, setImagenSrc] = useState<string | null>(null)
   const [crop, setCrop] = useState({ x: 0, y: 0 })
-  const [zoom, setZoom] = useState(1)
+  const [zoom, setZoom] = useState(0.5)
   const [croppedArea, setCroppedArea] = useState<Area | null>(null)
   const [cargando, setCargando] = useState(true)
   const [subiendo, setSubiendo] = useState(false)
@@ -89,10 +90,21 @@ export default function Servicios() {
     cargarDatos()
   }
 
-  const eliminar = async (id: string) => {
-    await supabase.from('servicios').delete().eq('id', id)
-    cargarDatos()
+ const eliminar = async (id: string) => {
+  setErrorEliminar(null)
+  const { count } = await supabase
+    .from('citas')
+    .select('*', { count: 'exact', head: true })
+    .eq('servicio_id', id)
+
+  if (count && count > 0) {
+    setErrorEliminar(`No se puede eliminar este servicio porque tiene ${count} cita(s) asociada(s). Primero cancélalas desde el panel de Citas.`)
+    return
   }
+
+  await supabase.from('servicios').delete().eq('id', id)
+  cargarDatos()
+}
 
   useEffect(() => { cargarDatos() }, [])
 
@@ -117,17 +129,19 @@ export default function Servicios() {
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
-                  <div className="relative w-full h-48 bg-gray-900 rounded-xl overflow-hidden">
-                    <Cropper
-                      image={imagenSrc}
-                      crop={crop}
-                      zoom={zoom}
-                      aspect={16 / 9}
-                      onCropChange={setCrop}
-                      onZoomChange={setZoom}
-                      onCropComplete={onCropComplete}
-                    />
-                  </div>
+  <div className="relative w-full h-80 bg-gray-100 rounded-xl overflow-hidden border border-[#e5e5e5]">
+  <Cropper
+    image={imagenSrc}
+    crop={crop}
+    zoom={zoom}
+    aspect={1}
+    onCropChange={setCrop}
+    onZoomChange={setZoom}
+    onCropComplete={onCropComplete}
+    minZoom={0.5}
+    zoomSpeed={0.3}
+  />
+</div>
                   <div className="flex items-center gap-3">
                     <span className="text-xs text-gray-400">Zoom</span>
                     <input type="range" min={1} max={3} step={0.01} value={zoom}
@@ -169,7 +183,12 @@ export default function Servicios() {
             </button>
           </div>
         </div>
-
+{errorEliminar && (
+  <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 mb-4 flex justify-between items-center">
+    <p className="text-red-600 text-sm">{errorEliminar}</p>
+    <button onClick={() => setErrorEliminar(null)} className="text-red-400 hover:text-red-600 ml-4 text-lg leading-none">×</button>
+  </div>
+)}
         {/* Lista */}
         {cargando ? <p className="text-gray-400 text-sm">Cargando...</p> : servicios.length === 0 ? (
           <p className="text-gray-400 text-sm">No hay servicios aún.</p>

@@ -16,6 +16,7 @@ function localDateKey(d: Date): string {
   const day = d.getDate().toString().padStart(2, '0')
   return `${y}-${m}-${day}`
 }
+
 function generarSlots(
   horarios: { dia_semana: number; hora_inicio: string; hora_fin: string; activo: boolean }[],
   duracion: number,
@@ -25,7 +26,6 @@ function generarSlots(
   const slots: Record<string, string[]> = {}
   const ahora = new Date()
   const limiteMinimo = new Date(ahora.getTime() + horasAnticipacion * 60 * 60 * 1000)
-
   for (let i = 0; i < 14; i++) {
     const fecha = new Date(ahora)
     fecha.setDate(ahora.getDate() + i)
@@ -68,6 +68,13 @@ const DIAS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
 const MESES_FULL = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
 
+function validarTelefonoColombia(tel: string): boolean {
+  const limpio = tel.replace(/\s/g, '')
+  return /^3\d{9}$/.test(limpio)
+}
+function validarEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)
+}
 export default function NegocioPage() {
   const { slug } = useParams()
   const [negocio, setNegocio] = useState<Negocio | null>(null)
@@ -78,6 +85,7 @@ export default function NegocioPage() {
   const [citasOcupadas, setCitasOcupadas] = useState<CitaOcupada[]>([])
   const [paso, setPaso] = useState(1)
   const [servicioId, setServicioId] = useState('')
+  const [modo, setModo] = useState<'rapido' | 'profesional' | null>(null)
   const [profesionalId, setProfesionalId] = useState('')
   const [fechaSeleccionada, setFechaSeleccionada] = useState('')
   const [horaSeleccionada, setHoraSeleccionada] = useState('')
@@ -112,7 +120,6 @@ export default function NegocioPage() {
   const profesional = profesionales.find(p => p.id === profesionalId)
   const hayProfesionales = profesionales.length > 0
 
-  // Slots individuales por profesional (para calcular union y disponibilidad)
   const slotsPorProfesional: Record<string, Record<string, string[]>> = {}
   if (servicio && hayProfesionales) {
     for (const p of profesionales) {
@@ -122,74 +129,239 @@ export default function NegocioPage() {
     }
   }
 
-  // Slots combinados: union de todos los profesionales, o el horario general si no hay profesionales
-  let slots: Record<string, string[]> = {}
-  if (servicio) {
-    if (hayProfesionales) {
-      const union: Record<string, Set<string>> = {}
-      for (const p of profesionales) {
-        const sp = slotsPorProfesional[p.id] || {}
-        for (const fecha in sp) {
-          if (!union[fecha]) union[fecha] = new Set()
-          sp[fecha].forEach(h => union[fecha].add(h))
-        }
+  let slotsUnion: Record<string, string[]> = {}
+  if (servicio && hayProfesionales) {
+    const union: Record<string, Set<string>> = {}
+    for (const p of profesionales) {
+      const sp = slotsPorProfesional[p.id] || {}
+      for (const fecha in sp) {
+        if (!union[fecha]) union[fecha] = new Set()
+        sp[fecha].forEach(h => union[fecha].add(h))
       }
-      for (const fecha in union) {
-        slots[fecha] = Array.from(union[fecha]).sort()
-      }
-    } else {
-      const citasGenerales = citasKeysDe(citasOcupadas, null)
-      slots = generarSlots(horarios, servicio.duracion_minutos, citasGenerales)
     }
+    for (const fecha in union) slotsUnion[fecha] = Array.from(union[fecha]).sort()
   }
 
-  const fechasDisponibles = Object.keys(slots).sort()
+  let slotsGeneral: Record<string, string[]> = {}
+  if (servicio && !hayProfesionales) {
+    const citasGenerales = citasKeysDe(citasOcupadas, null)
+    slotsGeneral = generarSlots(horarios, servicio.duracion_minutos, citasGenerales)
+  }
+
+  let slotsActivos: Record<string, string[]> = {}
+  if (!hayProfesionales) slotsActivos = slotsGeneral
+  else if (modo === 'profesional' && profesionalId) slotsActivos = slotsPorProfesional[profesionalId] || {}
+  else slotsActivos = slotsUnion
+
+  const fechasDisponibles = Object.keys(slotsActivos).sort()
   const fechasVisibles = fechasDisponibles.slice(offsetFechas, offsetFechas + 7)
-  const slotsFecha = fechaSeleccionada ? (slots[fechaSeleccionada] || []) : []
+  const slotsFecha = fechaSeleccionada ? (slotsActivos[fechaSeleccionada] || []) : []
   const slotsMañana = slotsFecha.filter(h => parseInt(h.split(':')[0]) < 12)
   const slotsTarde = slotsFecha.filter(h => parseInt(h.split(':')[0]) >= 12)
 
-  // Profesionales disponibles para la fecha y hora elegida
   const profesionalesDisponibles = (fechaSeleccionada && horaSeleccionada)
     ? profesionales.filter(p => (slotsPorProfesional[p.id]?.[fechaSeleccionada] || []).includes(horaSeleccionada))
     : []
 
-  const pasos = hayProfesionales
-    ? [{ n: 1, label: 'Servicio' }, { n: 2, label: 'Fecha y hora' }, { n: 3, label: 'Profesional' }, { n: 4, label: 'Tus datos' }]
-    : [{ n: 1, label: 'Servicio' }, { n: 2, label: 'Fecha y hora' }, { n: 4, label: 'Tus datos' }]
+  const pasos = !hayProfesionales
+    ? [{ n: 1, label: 'Servicio' }, { n: 2, label: 'Fecha y hora' }, { n: 4, label: 'Tus datos' }]
+    : modo === 'profesional'
+      ? [{ n: 1, label: 'Servicio' }, { n: 2, label: 'Preferencia' }, { n: 3, label: 'Profesional' }, { n: 4, label: 'Fecha y hora' }, { n: 5, label: 'Tus datos' }]
+      : [{ n: 1, label: 'Servicio' }, { n: 2, label: 'Preferencia' }, { n: 3, label: 'Fecha y hora' }, { n: 4, label: 'Profesional' }, { n: 5, label: 'Tus datos' }]
+
+  const volverA = (n: number) => {
+    if (n <= 2) { setModo(null); setProfesionalId(''); setFechaSeleccionada(''); setHoraSeleccionada(''); setOffsetFechas(0) }
+    else if (n === 3) { setFechaSeleccionada(''); setHoraSeleccionada(''); setProfesionalId('') }
+    else if (n === 4) {
+      if (modo === 'profesional') { setFechaSeleccionada(''); setHoraSeleccionada('') }
+      else { setProfesionalId('') }
+    }
+    setPaso(n)
+  }
 
   const handleSubmit = async () => {
-    if (!negocio || !servicio) return
-    setCargando(true)
-    const fecha_hora = `${fechaSeleccionada}T${horaSeleccionada}`
-    const { error } = await supabase.from('citas').insert([{
-      ...form,
-      servicio_id: servicioId,
-      profesional_id: profesionalId || null,
-      fecha_hora,
-      negocio_id: negocio.id,
-      estado: 'nueva'
-    }])
-    if (!error) {
-      await fetch('/api/enviar-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cliente_nombre: form.cliente_nombre,
-          cliente_email: form.cliente_email,
-          cliente_telefono: form.cliente_telefono,
-          fecha_hora,
-          servicio_nombre: servicio.nombre,
-          servicio_precio: servicio.precio,
-          notas: form.notas,
-          negocio_email: negocio.email
-        })
+  if (!negocio || !servicio) return
+  setCargando(true)
+  const fecha_hora = `${fechaSeleccionada}T${horaSeleccionada}`
+  const { data, error } = await supabase.from('citas').insert([{
+    ...form,
+    servicio_id: servicioId,
+    profesional_id: profesionalId || null,
+    fecha_hora,
+    negocio_id: negocio.id,
+    estado: 'nueva'
+  }]).select('id').single()
+
+  if (!error && data) {
+    await fetch('/api/enviar-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        cliente_nombre: form.cliente_nombre,
+        cliente_email: form.cliente_email,
+        cliente_telefono: form.cliente_telefono,
+        fecha_hora,
+        servicio_nombre: servicio.nombre,
+        servicio_precio: servicio.precio,
+        notas: form.notas,
+        negocio_email: negocio.email,
+        negocio_nombre: negocio.nombre,
+        cita_id: data.id
       })
-    }
-    setCargando(false)
-    if (!error) setEnviado(true)
-    else alert('Hubo un error, intenta de nuevo')
+    })
   }
+  setCargando(false)
+  if (!error) setEnviado(true)
+  else alert('Hubo un error, intenta de nuevo')
+}
+  const FormularioContacto = (
+    <div className="flex flex-col gap-3">
+      <input required placeholder="Nombre completo"
+        className="bg-white border border-[#e5e5e5] rounded-xl px-4 py-3 text-[#111] placeholder-[#a3a3a3] focus:outline-none focus:border-amber-400 transition text-sm"
+        value={form.cliente_nombre} onChange={e => setForm({...form, cliente_nombre: e.target.value})} />
+      <div>
+  <input type="email" placeholder="Correo electrónico"
+    className={`bg-white border rounded-xl px-4 py-3 text-[#111] placeholder-[#a3a3a3] focus:outline-none transition text-sm w-full ${form.cliente_email && !validarEmail(form.cliente_email) ? 'border-red-300 focus:border-red-400' : 'border-[#e5e5e5] focus:border-amber-400'}`}
+    value={form.cliente_email} onChange={e => setForm({...form, cliente_email: e.target.value})} />
+  {form.cliente_email && !validarEmail(form.cliente_email) && (
+    <p className="text-red-400 text-xs mt-1 ml-1">Ingresa un correo válido (ej: nombre@gmail.com)</p>
+  )}
+</div>
+      <div>
+        <div className="flex gap-2">
+          <div className="flex items-center gap-2 bg-white border border-[#e5e5e5] rounded-xl px-4 py-3 text-sm text-[#111] flex-shrink-0">
+            🇨🇴 <span className="font-bold">+57</span>
+          </div>
+          <input placeholder="300 123 4567" maxLength={10}
+            className={`bg-white border rounded-xl px-4 py-3 text-[#111] placeholder-[#a3a3a3] focus:outline-none transition text-sm flex-1 ${form.cliente_telefono && !validarTelefonoColombia(form.cliente_telefono) ? 'border-red-300 focus:border-red-400' : 'border-[#e5e5e5] focus:border-amber-400'}`}
+            value={form.cliente_telefono}
+            onChange={e => { const val = e.target.value.replace(/\D/g, '').slice(0, 10); setForm({...form, cliente_telefono: val}) }} />
+        </div>
+        {form.cliente_telefono && !validarTelefonoColombia(form.cliente_telefono) && (
+          <p className="text-red-400 text-xs mt-1 ml-1">Ingresa un celular colombiano válido (10 dígitos, empieza por 3)</p>
+        )}
+      </div>
+      <textarea placeholder="¿Algo que debamos saber? (opcional)" rows={3}
+        className="bg-white border border-[#e5e5e5] rounded-xl px-4 py-3 text-[#111] placeholder-[#a3a3a3] focus:outline-none focus:border-amber-400 transition text-sm resize-none"
+        value={form.notas} onChange={e => setForm({...form, notas: e.target.value})} />
+      <button onClick={handleSubmit} disabled={cargando || !form.cliente_nombre || !validarTelefonoColombia(form.cliente_telefono) || !validarEmail(form.cliente_email)}
+        className="bg-amber-400 text-[#111] font-black py-4 rounded-xl hover:bg-amber-500 transition disabled:opacity-50 mt-2">
+        {cargando ? 'Enviando...' : 'Confirmar cita'}
+      </button>
+    </div>
+  )
+
+  const SelectorFechaHora = ({ onContinuar }: { onContinuar: () => void }) => (
+    <div>
+      {fechasDisponibles.length === 0 ? (
+        <div className="bg-white border border-[#e5e5e5] rounded-2xl p-8 text-center">
+          <p className="text-3xl mb-2">📅</p>
+          <p className="text-gray-500 text-sm">
+            {modo === 'profesional' && profesional
+              ? `${profesional.nombre} no tiene horarios disponibles configurados.`
+              : 'No hay fechas disponibles en los próximos 14 días.'}
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="bg-white border border-[#e5e5e5] rounded-2xl p-5 mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <span className="font-bold text-[#111] text-sm">
+                {fechasVisibles.length > 0 && MESES_FULL[new Date(fechasVisibles[0] + 'T00:00:00').getMonth()]}
+              </span>
+              <div className="flex gap-2">
+                <button onClick={() => setOffsetFechas(Math.max(0, offsetFechas - 7))} disabled={offsetFechas === 0}
+                  className="w-8 h-8 rounded-full border border-[#e5e5e5] flex items-center justify-center text-sm disabled:opacity-30 hover:border-amber-400 transition">‹</button>
+                <button onClick={() => setOffsetFechas(Math.min(fechasDisponibles.length - 1, offsetFechas + 7))} disabled={offsetFechas + 7 >= fechasDisponibles.length}
+                  className="w-8 h-8 rounded-full border border-[#e5e5e5] flex items-center justify-center text-sm disabled:opacity-30 hover:border-amber-400 transition">›</button>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              {fechasVisibles.map(fecha => {
+                const d = new Date(fecha + 'T00:00:00')
+                return (
+                  <button key={fecha} onClick={() => { setFechaSeleccionada(fecha); setHoraSeleccionada('') }}
+                    className={`flex-1 border-2 rounded-xl py-3 text-center transition ${fechaSeleccionada === fecha ? 'border-amber-400 bg-amber-400' : 'border-[#e5e5e5] bg-white hover:border-amber-300'}`}>
+                    <p className={`text-xs ${fechaSeleccionada === fecha ? 'text-[#111]' : 'text-[#a3a3a3]'}`}>{DIAS[d.getDay()]}</p>
+                    <p className="font-black text-lg leading-tight text-[#111]">{d.getDate()}</p>
+                    <p className={`text-xs ${fechaSeleccionada === fecha ? 'text-[#111]' : 'text-[#a3a3a3]'}`}>{MESES[d.getMonth()]}</p>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+          {fechaSeleccionada && (
+            <div className="bg-white border border-[#e5e5e5] rounded-2xl p-5">
+              {slotsMañana.length === 0 && slotsTarde.length === 0 ? (
+                <p className="text-gray-400 text-sm text-center py-2">No hay horas disponibles para este día.</p>
+              ) : (
+                <>
+                  {slotsMañana.length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-xs font-bold text-[#a3a3a3] uppercase tracking-widest mb-3">Mañana</p>
+                      <div className="flex gap-2 flex-wrap">
+                        {slotsMañana.map(hora => (
+                          <button key={hora} onClick={() => setHoraSeleccionada(hora)}
+                            className={`border-2 rounded-xl px-4 py-2 text-sm font-bold transition ${horaSeleccionada === hora ? 'border-amber-400 bg-amber-400 text-[#111]' : 'border-[#e5e5e5] text-[#111] hover:border-amber-300'}`}>
+                            {hora}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {slotsTarde.length > 0 && (
+                    <div>
+                      <p className="text-xs font-bold text-[#a3a3a3] uppercase tracking-widest mb-3">Tarde</p>
+                      <div className="flex gap-2 flex-wrap">
+                        {slotsTarde.map(hora => (
+                          <button key={hora} onClick={() => setHoraSeleccionada(hora)}
+                            className={`border-2 rounded-xl px-4 py-2 text-sm font-bold transition ${horaSeleccionada === hora ? 'border-amber-400 bg-amber-400 text-[#111]' : 'border-[#e5e5e5] text-[#111] hover:border-amber-300'}`}>
+                            {hora}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </>
+      )}
+      {horaSeleccionada && (
+        <button onClick={onContinuar} className="w-full mt-6 bg-amber-400 text-[#111] font-black py-4 rounded-xl hover:bg-amber-500 transition">
+          Continuar →
+        </button>
+      )}
+    </div>
+  )
+
+  const SelectorProfesional = ({ lista, onElegir }: { lista: Profesional[]; onElegir: (id: string) => void }) => (
+    lista.length === 0 ? (
+      <div className="bg-white border border-[#e5e5e5] rounded-2xl p-8 text-center">
+        <p className="text-3xl mb-2">😕</p>
+        <p className="text-gray-500 text-sm">Nadie está disponible a esta hora. Vuelve a elegir otra.</p>
+        <button onClick={() => volverA(3)} className="mt-4 text-amber-500 font-bold text-sm hover:underline">← Elegir otra hora</button>
+      </div>
+    ) : (
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+        {lista.map(p => (
+          <button key={p.id} onClick={() => onElegir(p.id)}
+            className={`border-2 rounded-xl p-4 text-center transition ${profesionalId === p.id ? 'border-amber-400 bg-amber-50' : 'border-[#e5e5e5] bg-white hover:border-amber-300'}`}>
+            {p.foto_url ? (
+              <img src={p.foto_url} alt={p.nombre} className="w-16 h-16 rounded-full object-cover border-2 border-amber-200 mx-auto mb-3" />
+            ) : (
+              <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center text-2xl font-black text-amber-500 mx-auto mb-3">
+                {p.nombre.charAt(0)}
+              </div>
+            )}
+            <p className="font-bold text-[#111] text-sm">{p.nombre}</p>
+            <p className="text-[#a3a3a3] text-xs mt-1">{p.especialidad}</p>
+          </button>
+        ))}
+      </div>
+    )
+  )
 
   if (noEncontrado) return (
     <main className="min-h-screen bg-[#fafafa] flex items-center justify-center">
@@ -232,7 +404,7 @@ export default function NegocioPage() {
             const activo = paso === p.n
             const completado = paso > p.n
             return (
-              <button key={p.n} onClick={() => completado && setPaso(p.n)}
+              <button key={p.n} onClick={() => completado && volverA(p.n)}
                 className={`flex items-center gap-2 text-sm font-medium transition whitespace-nowrap ${activo ? 'text-[#111]' : completado ? 'text-amber-500 cursor-pointer' : 'text-[#a3a3a3]'}`}>
                 <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black flex-shrink-0 ${activo || completado ? 'bg-amber-400 text-[#111]' : 'bg-[#e5e5e5] text-[#a3a3a3]'}`}>
                   {completado ? '✓' : i + 1}
@@ -247,20 +419,13 @@ export default function NegocioPage() {
       <div className="max-w-5xl mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2">
 
-          {/* PASO 1: Servicios */}
+          {/* PASO 1 */}
           {paso === 1 && (
             <div>
               <h2 className="text-xl font-black text-[#111] mb-6">¿Qué servicio necesitas?</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {servicios.map(s => (
-                  <button key={s.id} onClick={() => {
-                    setServicioId(s.id)
-                    setFechaSeleccionada('')
-                    setHoraSeleccionada('')
-                    setProfesionalId('')
-                    setOffsetFechas(0)
-                    setPaso(2)
-                  }}
+                  <button key={s.id} onClick={() => { setServicioId(s.id); setModo(null); setProfesionalId(''); setFechaSeleccionada(''); setHoraSeleccionada(''); setOffsetFechas(0); setPaso(2) }}
                     className={`border-2 rounded-xl p-5 text-left transition ${servicioId === s.id ? 'border-amber-400 bg-amber-50' : 'border-[#e5e5e5] bg-white hover:border-amber-300'}`}>
                     <p className="font-black text-[#111] mb-1">{s.nombre}</p>
                     <div className="flex justify-between items-center">
@@ -273,150 +438,84 @@ export default function NegocioPage() {
             </div>
           )}
 
-          {/* PASO 2: Fecha y hora */}
-          {paso === 2 && (
+          {/* PASO 2 */}
+          {paso === 2 && !hayProfesionales && (
             <div>
               <h2 className="text-xl font-black text-[#111] mb-6">¿Cuándo quieres tu cita?</h2>
-
-              {fechasDisponibles.length === 0 ? (
-                <div className="bg-white border border-[#e5e5e5] rounded-2xl p-8 text-center">
-                  <p className="text-3xl mb-2">📅</p>
-                  <p className="text-gray-500 text-sm">No hay fechas disponibles en los próximos 14 días.</p>
-                </div>
-              ) : (
-                <>
-                  <div className="bg-white border border-[#e5e5e5] rounded-2xl p-5 mb-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <span className="font-bold text-[#111] text-sm">
-                        {fechasVisibles.length > 0 && MESES_FULL[new Date(fechasVisibles[0] + 'T00:00:00').getMonth()]}
-                      </span>
-                      <div className="flex gap-2">
-                        <button onClick={() => setOffsetFechas(Math.max(0, offsetFechas - 7))} disabled={offsetFechas === 0}
-                          className="w-8 h-8 rounded-full border border-[#e5e5e5] flex items-center justify-center text-sm disabled:opacity-30 hover:border-amber-400 transition">‹</button>
-                        <button onClick={() => setOffsetFechas(Math.min(fechasDisponibles.length - 1, offsetFechas + 7))} disabled={offsetFechas + 7 >= fechasDisponibles.length}
-                          className="w-8 h-8 rounded-full border border-[#e5e5e5] flex items-center justify-center text-sm disabled:opacity-30 hover:border-amber-400 transition">›</button>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      {fechasVisibles.map(fecha => {
-                        const d = new Date(fecha + 'T00:00:00')
-                        return (
-                          <button key={fecha} onClick={() => { setFechaSeleccionada(fecha); setHoraSeleccionada(''); setProfesionalId('') }}
-                            className={`flex-1 border-2 rounded-xl py-3 text-center transition ${fechaSeleccionada === fecha ? 'border-amber-400 bg-amber-400' : 'border-[#e5e5e5] bg-white hover:border-amber-300'}`}>
-                            <p className={`text-xs ${fechaSeleccionada === fecha ? 'text-[#111]' : 'text-[#a3a3a3]'}`}>{DIAS[d.getDay()]}</p>
-                            <p className="font-black text-lg leading-tight text-[#111]">{d.getDate()}</p>
-                            <p className={`text-xs ${fechaSeleccionada === fecha ? 'text-[#111]' : 'text-[#a3a3a3]'}`}>{MESES[d.getMonth()]}</p>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-
-                  {fechaSeleccionada && (
-                    <div className="bg-white border border-[#e5e5e5] rounded-2xl p-5">
-                      {slotsMañana.length === 0 && slotsTarde.length === 0 ? (
-                        <p className="text-gray-400 text-sm text-center py-2">No hay horas disponibles para este día.</p>
-                      ) : (
-                        <>
-                          {slotsMañana.length > 0 && (
-                            <div className="mb-4">
-                              <p className="text-xs font-bold text-[#a3a3a3] uppercase tracking-widest mb-3">Mañana</p>
-                              <div className="flex gap-2 flex-wrap">
-                                {slotsMañana.map(hora => (
-                                  <button key={hora} onClick={() => { setHoraSeleccionada(hora); setProfesionalId('') }}
-                                    className={`border-2 rounded-xl px-4 py-2 text-sm font-bold transition ${horaSeleccionada === hora ? 'border-amber-400 bg-amber-400 text-[#111]' : 'border-[#e5e5e5] text-[#111] hover:border-amber-300'}`}>
-                                    {hora}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          {slotsTarde.length > 0 && (
-                            <div>
-                              <p className="text-xs font-bold text-[#a3a3a3] uppercase tracking-widest mb-3">Tarde</p>
-                              <div className="flex gap-2 flex-wrap">
-                                {slotsTarde.map(hora => (
-                                  <button key={hora} onClick={() => { setHoraSeleccionada(hora); setProfesionalId('') }}
-                                    className={`border-2 rounded-xl px-4 py-2 text-sm font-bold transition ${horaSeleccionada === hora ? 'border-amber-400 bg-amber-400 text-[#111]' : 'border-[#e5e5e5] text-[#111] hover:border-amber-300'}`}>
-                                    {hora}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-
-              {horaSeleccionada && (
-                <button onClick={() => setPaso(hayProfesionales ? 3 : 4)} className="w-full mt-6 bg-amber-400 text-[#111] font-black py-4 rounded-xl hover:bg-amber-500 transition">
-                  Continuar →
-                </button>
-              )}
+              <SelectorFechaHora onContinuar={() => setPaso(4)} />
             </div>
           )}
 
-          {/* PASO 3: Profesional disponible a esa hora */}
-          {paso === 3 && hayProfesionales && (
+          {paso === 2 && hayProfesionales && (
+            <div>
+              <h2 className="text-xl font-black text-[#111] mb-2">¿Cómo prefieres agendar?</h2>
+              <p className="text-sm text-gray-400 mb-6">Elige lo que más te convenga</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <button onClick={() => { setModo('profesional'); setPaso(3) }}
+                  className="border-2 border-[#e5e5e5] hover:border-amber-400 bg-white rounded-2xl p-6 text-left transition">
+                  <p className="text-3xl mb-3">👤</p>
+                  <p className="font-black text-[#111] mb-1">Elegir mi profesional</p>
+                  <p className="text-sm text-gray-400">Tengo un profesional de confianza y quiero ver sus horarios disponibles.</p>
+                </button>
+                <button onClick={() => { setModo('rapido'); setPaso(3) }}
+                  className="border-2 border-[#e5e5e5] hover:border-amber-400 bg-white rounded-2xl p-6 text-left transition">
+                  <p className="text-3xl mb-3">⚡</p>
+                  <p className="font-black text-[#111] mb-1">Ver primera disponibilidad</p>
+                  <p className="text-sm text-gray-400">No me importa quién me atienda, solo quiero la hora más pronta.</p>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* PASO 3 */}
+          {paso === 3 && hayProfesionales && modo === 'profesional' && (
+            <div>
+              <h2 className="text-xl font-black text-[#111] mb-6">¿Con quién quieres tu cita?</h2>
+              <SelectorProfesional lista={profesionales} onElegir={(id) => { setProfesionalId(id); setFechaSeleccionada(''); setHoraSeleccionada(''); setOffsetFechas(0); setPaso(4) }} />
+            </div>
+          )}
+
+          {paso === 3 && hayProfesionales && modo === 'rapido' && (
+            <div>
+              <h2 className="text-xl font-black text-[#111] mb-6">¿Cuándo quieres tu cita?</h2>
+              <SelectorFechaHora onContinuar={() => setPaso(4)} />
+            </div>
+          )}
+
+          {/* PASO 4 */}
+          {paso === 4 && !hayProfesionales && (
+            <div>
+              <h2 className="text-xl font-black text-[#111] mb-6">¿Cómo te contactamos?</h2>
+              {FormularioContacto}
+            </div>
+          )}
+
+          {paso === 4 && hayProfesionales && modo === 'profesional' && (
+            <div>
+              <h2 className="text-xl font-black text-[#111] mb-2">¿Cuándo quieres tu cita?</h2>
+              <p className="text-sm text-gray-400 mb-6">Horarios de {profesional?.nombre}</p>
+              <SelectorFechaHora onContinuar={() => setPaso(5)} />
+            </div>
+          )}
+
+          {paso === 4 && hayProfesionales && modo === 'rapido' && (
             <div>
               <h2 className="text-xl font-black text-[#111] mb-2">¿Con quién quieres tu cita?</h2>
               <p className="text-sm text-gray-400 mb-6">
                 Disponibles el {DIAS_FULL[new Date(fechaSeleccionada + 'T00:00:00').getDay()]} {new Date(fechaSeleccionada + 'T00:00:00').getDate()} de {MESES_FULL[new Date(fechaSeleccionada + 'T00:00:00').getMonth()]} a las {horaSeleccionada}
               </p>
-              {profesionalesDisponibles.length === 0 ? (
-                <div className="bg-white border border-[#e5e5e5] rounded-2xl p-8 text-center">
-                  <p className="text-3xl mb-2">😕</p>
-                  <p className="text-gray-500 text-sm">Nadie está disponible a esta hora. Vuelve a elegir otra.</p>
-                  <button onClick={() => setPaso(2)} className="mt-4 text-amber-500 font-bold text-sm hover:underline">← Elegir otra hora</button>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                  {profesionalesDisponibles.map(p => (
-                    <button key={p.id} onClick={() => { setProfesionalId(p.id); setPaso(4) }}
-                      className={`border-2 rounded-xl p-4 text-center transition ${profesionalId === p.id ? 'border-amber-400 bg-amber-50' : 'border-[#e5e5e5] bg-white hover:border-amber-300'}`}>
-                      {p.foto_url ? (
-                        <img src={p.foto_url} alt={p.nombre} className="w-16 h-16 rounded-full object-cover border-2 border-amber-200 mx-auto mb-3" />
-                      ) : (
-                        <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center text-2xl font-black text-amber-500 mx-auto mb-3">
-                          {p.nombre.charAt(0)}
-                        </div>
-                      )}
-                      <p className="font-bold text-[#111] text-sm">{p.nombre}</p>
-                      <p className="text-[#a3a3a3] text-xs mt-1">{p.especialidad}</p>
-                    </button>
-                  ))}
-                </div>
-              )}
+              <SelectorProfesional lista={profesionalesDisponibles} onElegir={(id) => { setProfesionalId(id); setPaso(5) }} />
             </div>
           )}
 
-          {/* PASO 4: Datos */}
-          {paso === 4 && (
+          {/* PASO 5 */}
+          {paso === 5 && hayProfesionales && (
             <div>
               <h2 className="text-xl font-black text-[#111] mb-6">¿Cómo te contactamos?</h2>
-              <div className="flex flex-col gap-3">
-                <input required placeholder="Nombre completo"
-                  className="bg-white border border-[#e5e5e5] rounded-xl px-4 py-3 text-[#111] placeholder-[#a3a3a3] focus:outline-none focus:border-amber-400 transition text-sm"
-                  value={form.cliente_nombre} onChange={e => setForm({...form, cliente_nombre: e.target.value})} />
-                <input type="email" placeholder="Correo electrónico"
-                  className="bg-white border border-[#e5e5e5] rounded-xl px-4 py-3 text-[#111] placeholder-[#a3a3a3] focus:outline-none focus:border-amber-400 transition text-sm"
-                  value={form.cliente_email} onChange={e => setForm({...form, cliente_email: e.target.value})} />
-                <input placeholder="Teléfono / WhatsApp"
-                  className="bg-white border border-[#e5e5e5] rounded-xl px-4 py-3 text-[#111] placeholder-[#a3a3a3] focus:outline-none focus:border-amber-400 transition text-sm"
-                  value={form.cliente_telefono} onChange={e => setForm({...form, cliente_telefono: e.target.value})} />
-                <textarea placeholder="¿Algo que debamos saber? (opcional)" rows={3}
-                  className="bg-white border border-[#e5e5e5] rounded-xl px-4 py-3 text-[#111] placeholder-[#a3a3a3] focus:outline-none focus:border-amber-400 transition text-sm resize-none"
-                  value={form.notas} onChange={e => setForm({...form, notas: e.target.value})} />
-                <button onClick={handleSubmit} disabled={cargando || !form.cliente_nombre}
-                  className="bg-amber-400 text-[#111] font-black py-4 rounded-xl hover:bg-amber-500 transition disabled:opacity-50 mt-2">
-                  {cargando ? 'Enviando...' : 'Confirmar cita'}
-                </button>
-              </div>
+              {FormularioContacto}
             </div>
           )}
+
         </div>
 
         {/* Panel lateral */}
